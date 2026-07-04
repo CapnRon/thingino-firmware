@@ -1,0 +1,11 @@
+# U-Env for Custom T23ZN with ATBM6441
+serialport=ttyS1
+
+# WiFi module load
+wifi_module=atbm6441_wifi_sdio
+
+# WiFi interface name (ESP-Hosted SDIO bridge creates ethsta0, not wlan0)
+wifi_ifname=ethsta0
+
+# ATBM IoT supplicant
+supplicant=atbm_iot_supplicant_demo

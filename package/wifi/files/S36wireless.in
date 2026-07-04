@@ -296,8 +296,13 @@ start() {
 		@else@
 		echo "Skip GPIO setup for @SOC_MODEL@"
 		@endif@
-		echo "Send INSERT to MMC1"
-		mmc 1
+		# Skip MMC insert if module was already loaded (ATBM chips pre-loaded by S09mmc)
+		if grep -q "$WLAN_MODULE_NAME" /proc/modules; then
+			echo "Module already loaded, skipping MMC insert"
+		else
+			echo "Send INSERT to MMC1"
+			mmc 1
+		fi
 		@endif@
 		@endif@
 	fi
@@ -314,7 +319,7 @@ start() {
 	fi
 	@endif@
 
-	if grep -q "^$WLAN_MODULE_NAME\b" /proc/modules; then
+	if grep -q "^$WLAN_MODULE_NAME " /proc/modules; then
 		echo "Module $WLAN_MODULE_NAME is already loaded"
 	else
 		echo "Loading $WLAN_MODULE_NAME module with parameters $WLAN_MODULE_OPTS"
@@ -330,6 +335,9 @@ start() {
 
 	@if !WIFI_IS_HI3881@
 	@if !WIFI_ATBM6461@
+	@if !WIFI_ATBM6441@
+	# ATBM6441: the IoT supplicant owns wlan0 (IP comes from the MCU) and
+	# the driver rejects SIOCSIFHWADDR — never down the interface here.
 	if [ -n "$wlan_mac" ]; then
 		if ip link | grep -q $IFACE >/dev/null; then
 			echo "Bring interface $IFACE down"
@@ -339,6 +347,7 @@ start() {
 		echo "Set MAC address to $wlan_mac"
 		ip link set dev $IFACE address $wlan_mac
 	fi
+	@endif@
 	@endif@
 	@endif@
 	# play /usr/share/sounds/wificonnected.opus
