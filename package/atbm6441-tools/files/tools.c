@@ -2848,7 +2848,7 @@ int insmod_driver(int test_insmod)
 
 	if (!test_insmod)
 	{
-		system("insmod /usr/lib/modules/$(uname -r)/extra/atbm6441_wifi_sdio.ko atbm_printk_mask=0xFF");
+		system("insmod /usr/lib/modules/$(uname -r)/extra/atbm6441_wifi_sdio.ko atbm_printk_mask=0");
 	}
 	if((access("/dev/atbm_ioctl",F_OK)) == -1)
 	{

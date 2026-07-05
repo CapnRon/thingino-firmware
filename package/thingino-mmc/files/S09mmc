@@ -188,25 +188,24 @@ start() {
 
 	ATBM6441_MOD="/usr/lib/modules/$(uname -r)/extra/atbm6441_wifi_sdio.ko"
 	if [ -f "$ATBM6441_MOD" ]; then
-		# DEBUG: show all kernel messages on console during bringup
-		echo 8 > /proc/sys/kernel/printk
-		echo "ATBM6441: waiting for MCU to boot..."
-		sleep 5
-		echo "ATBM6441: triggering SDIO card detect"
-		echo "INSERT" > /sys/devices/platform/jzmmc_v1.2.1/present
-		sleep 2
-		echo "ATBM6441: SDIO devices now: $(ls /sys/bus/sdio/devices 2>/dev/null || echo NONE)"
-		# DEBUG: run bringup in background so boot always completes;
-		# if insmod hangs, inspect with: cat /proc/$(pidof insmod)/wchan
+		# The ATBM6441 MCU boots its own firmware from NVM and only
+		# answers on SDIO ~5s after power-on; jzmmc is built-in and
+		# probed long before that, so card detection must be re-armed
+		# via sysfs. Run the whole bringup in the background so boot
+		# is not stalled (S38 waits for the supplicant socket before
+		# provisioning the MCU).
 		(
+			echo "ATBM6441: waiting for MCU to boot"
+			sleep 5
+			echo "INSERT" > /sys/devices/platform/jzmmc_v1.2.1/present
+			sleep 2
 			# An unconnected MCU power-naps between scan bursts and can
 			# sleep through the probe (wsm_startup timeout). Retry with a
 			# fresh card detect so one bad window can't kill WiFi for the
 			# whole boot.
 			tries=3
 			while :; do
-				echo "ATBM6441: loading module (background)"
-				insmod "$ATBM6441_MOD" atbm_printk_mask=0xFF
+				insmod "$ATBM6441_MOD" atbm_printk_mask=0
 				sleep 1
 				[ -d /sys/class/net/wlan0 ] && break
 				tries=$((tries - 1))
@@ -221,13 +220,10 @@ start() {
 				echo "INSERT" > /sys/devices/platform/jzmmc_v1.2.1/present
 				sleep 2
 			done
-			echo "ATBM6441: starting IoT supplicant to init MCU"
-			/usr/bin/atbm_iot_supplicant_demo &
-			# NOTE: mcu_sdio_eth (ESP-Hosted data path) is NOT loaded here.
-			# The ATBM control driver owns the single SDIO function. After
-			# the WiFi association is configured, run "atbm_iot_cli driver_sleep"
-			# (unloads control driver), then insmod mcu_sdio_eth.ko — its
-			# registration probes the freed function and creates ethsta0.
+			if [ -d /sys/class/net/wlan0 ]; then
+				echo "ATBM6441: starting IoT supplicant"
+				/usr/bin/atbm_iot_supplicant_demo &
+			fi
 		) &
 	fi
 }

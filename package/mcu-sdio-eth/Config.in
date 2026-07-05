@@ -1,7 +1,0 @@
-config BR2_PACKAGE_MCU_SDIO_ETH
-	bool "MCU SDIO Ethernet (ESP-Hosted)"
-	select BR2_LINUX_KERNEL
-	help
-	  ESP-Hosted FG SDIO Ethernet bridge driver for ATBM6441.
-	  Creates ethsta0 interface for data path between host and
-	  ATBM6441's internal NDS32 MCU over SDIO.
