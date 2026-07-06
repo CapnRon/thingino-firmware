@@ -2141,6 +2141,7 @@ err:
 int customer_cmd_cmd(int fp, int argc, char *argv[])
 {
 	int ret = 0;
+	unsigned int i, n, byte;
 	struct customer_cmd_req customer_cmd;
 
 	if (argc != 1 && argc != 2)
@@ -2149,21 +2150,46 @@ int customer_cmd_cmd(int fp, int argc, char *argv[])
 		goto err;
 	}
 
-	customer_cmd.cmd_id = atoi(argv[0]);
+	/* The 136-byte request is sent to the MCU verbatim; the MCU app
+	 * switches on the FIRST word (this struct's "status" field) as the
+	 * command selector and reads the parameters from the next byte on
+	 * (the "cmd_id" field and, for longer payloads, cmd_buff, which are
+	 * contiguous). Verified against the Jooan app:
+	 *   64 <byte>  = PIR on/off   (00 = enable, aa = disable)
+	 *   65 <t><l>  = PIR sensitivity [threshold, level]
+	 *                (vendor level 1/2/3 -> threshold 0x32/0x1e/0x14) */
+	memset(&customer_cmd, 0, sizeof(customer_cmd));
+	customer_cmd.status = strtoul(argv[0], NULL, 0);
 	if (argc > 1)
 	{
-		//reserved
+		unsigned char *payload = (unsigned char *)&customer_cmd.cmd_id;
+		unsigned int payload_max = sizeof(customer_cmd.cmd_id) +
+					   sizeof(customer_cmd.cmd_buff);
+
+		n = strlen(argv[1]);
+		if ((n & 1) || n / 2 > payload_max)
+		{
+			printf("Invalid CUSTOMER_CMD payload: even number of hex digits expected\n");
+			goto err;
+		}
+		for (i = 0; i < n / 2; i++)
+		{
+			if (sscanf(argv[1] + i * 2, "%2x", &byte) != 1)
+			{
+				printf("Invalid CUSTOMER_CMD payload: not hex at offset %u\n", i * 2);
+				goto err;
+			}
+			payload[i] = (u8)byte;
+		}
 	}
 
 	ret = ioctl(fp, ATBM_CUSTOMER_CMD, &customer_cmd);
 	if (ret)
 	{
-		//goto err;
-		printf("recv1:%s\n",customer_cmd.cmd_buff);
-		printf("recv1:%s\n",customer_cmd.cmd_id);
+		printf("CUSTOMER_CMD %s failed: %d\n", argv[0], ret);
+		goto err;
 	}
-		printf("recv2:%d\n",customer_cmd.cmd_id);
-		printf("recv2:%s\n",customer_cmd.cmd_buff);
+	printf("CUSTOMER_CMD %s ok\n", argv[0]);
 	return 0;
 err:
 	return -1;
