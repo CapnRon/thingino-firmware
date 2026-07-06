@@ -21,6 +21,11 @@ define ATBM6441_TOOLS_BUILD_CMDS
 		-Wno-error=implicit-function-declaration \
 		$(@D)/tools_cli.c -lpthread \
 		-o $(@D)/atbm_iot_cli
+
+	# Build pir_daemon (PIR-over-UART0 -> rod OSD status)
+	$(TARGET_CC) $(TARGET_CFLAGS) -I$(@D) \
+		$(@D)/pir_daemon.c \
+		-o $(@D)/pir_daemon
 endef
 
 define ATBM6441_TOOLS_INSTALL_TARGET_CMDS
@@ -28,6 +33,10 @@ define ATBM6441_TOOLS_INSTALL_TARGET_CMDS
 		$(TARGET_DIR)/usr/bin/atbm_iot_supplicant_demo
 	$(INSTALL) -D -m 0755 $(@D)/atbm_iot_cli \
 		$(TARGET_DIR)/usr/bin/atbm_iot_cli
+	$(INSTALL) -D -m 0755 $(@D)/pir_daemon \
+		$(TARGET_DIR)/usr/bin/pir_daemon
+	$(INSTALL) -D -m 0755 $(BR2_EXTERNAL_THINGINO_PATH)/package/atbm6441-tools/files/S32pir_daemon \
+		$(TARGET_DIR)/etc/init.d/S32pir_daemon
 endef
 
 $(eval $(generic-package))
