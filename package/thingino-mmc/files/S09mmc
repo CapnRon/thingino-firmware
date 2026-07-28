@@ -175,7 +175,7 @@ start() {
 	/sbin/mmc_gpio
 
 	gpio_mmc_cd=$(jct "$MMC_CONFIG_JSON" get "gpio.mmc_cd" 2>/dev/null || true)
-	MMC_PARAM="cd_gpio_pin=${gpio_mmc_cd:-61}"
+	MMC_PARAM="cd_gpio_pin=${gpio_mmc_cd:-59}"
 	load_module
 
 	ATBM_MOD="/usr/lib/modules/$(uname -r)/extra/atbm6461_wifi_sdio.ko"
@@ -197,7 +197,7 @@ start() {
 		(
 			echo "ATBM6441: waiting for MCU to boot"
 			sleep 5
-			echo "INSERT" > /sys/devices/platform/jzmmc_v1.2.1/present
+			echo "INSERT" >/sys/devices/platform/jzmmc_v1.2.1/present
 			sleep 2
 			# An unconnected MCU power-naps between scan bursts and can
 			# sleep through the probe (wsm_startup timeout). Retry with a
@@ -215,9 +215,9 @@ start() {
 				fi
 				echo "ATBM6441: probe failed (MCU napping?); re-detecting card"
 				rmmod atbm6441_wifi_sdio 2>/dev/null
-				echo "REMOVE" > /sys/devices/platform/jzmmc_v1.2.1/present
+				echo "REMOVE" >/sys/devices/platform/jzmmc_v1.2.1/present
 				sleep 2
-				echo "INSERT" > /sys/devices/platform/jzmmc_v1.2.1/present
+				echo "INSERT" >/sys/devices/platform/jzmmc_v1.2.1/present
 				sleep 2
 			done
 			if [ -d /sys/class/net/wlan0 ]; then
