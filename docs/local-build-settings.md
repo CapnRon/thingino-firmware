@@ -183,43 +183,6 @@ Example:
 }
 ```
 
-### `motors.json`
-
-Paths:
-
-```text
-user/common/motors.json
-user/<camera>/motors.json
-user/<camera>/<ip>/motors.json
-```
-
-Purpose:
-
-- Adds or overrides entries in `/etc/motors.json`
-- This is the user-scoped JSON add-on hook for PTZ and motor tuning values
-
-Build behavior:
-
-1. The package default `motors.json` is installed first
-2. The camera's `motors.json` is imported next, if present
-3. User `motors.json` files are imported in scope order: global, then camera, then device
-
-That means device-scoped user values win over camera-scoped user values, which
-win over global user values, which win over package and camera defaults.
-
-Example:
-
-```json
-{
-  "motors": {
-    "steps_pan": 2000,
-    "steps_tilt": 1100,
-    "speed_pan": 8,
-    "speed_tilt": 8
-  }
-}
-```
-
 ### `overlay/`
 
 Paths:
@@ -232,15 +195,15 @@ user/<camera>/<ip>/overlay/
 
 Purpose:
 
-- Seeds files into the writable config overlay partition
+- Seeds files into the writable data partition (overlayfs upperdir)
 - Best for user-specific config files, init scripts, certificates, and other
   files you want present on first boot but still editable on the device
 
 Build behavior:
 
-- `OUTPUT_DIR/config/` is rebuilt from scratch for each config image
+- `OUTPUT_DIR/data/overlay/` is rebuilt from scratch for each data image
 - Overlay directories are copied in scope order: global, then camera, then device
-- Packed into `images/config.jffs2`
+- Packed into `images/data.jffs2` as part of the overlay upperdir
 - Not included in `rootfs.squashfs`
 - Not included in `rootfs.tar`
 
@@ -272,21 +235,23 @@ user/<camera>/<ip>/opt/
 
 Purpose:
 
-- Adds user content to the extras partition mounted at `/opt`
-- Suitable for optional binaries, models, helper scripts, and other large or
-  user-managed add-ons that do not belong in the main rootfs
+- Adds user content directly into the overlay upperdir at `opt/`
+- The overlay covers the full filesystem, so these files appear at `/opt/`
+  at runtime, shadowing any package-installed files from the rootfs
+- Suitable for optional binaries, models, helper scripts, and other
+  user-managed add-ons
 
 Build behavior:
 
-- Files from `OUTPUT_DIR/target/opt/` are first copied into `OUTPUT_DIR/extras/`
-- Then user `opt/` directories are copied in scope order: global, then camera,
-  then device
-- The result is packed into `images/extras.jffs2`
+- User `opt/` directories are copied into `OUTPUT_DIR/data/overlay/opt/`
+  in scope order: global, then camera, then device
+- Packed into `images/data.jffs2` as part of the overlay upperdir
 
 Important detail:
 
-- The build now recreates `OUTPUT_DIR/extras/` before layering user content
 - If the same file exists in multiple scopes, the device-scoped copy wins
+- Files from `$(TARGET_DIR)/opt/` installed by packages remain in the rootfs
+  and are visible through the overlay lowerdir
 
 ### `local.uenv.txt`
 
@@ -328,15 +293,12 @@ user/common/thingino.json
 user/<camera>/thingino.json
 user/<camera>/<ip>/thingino.json
 
-user/common/motors.json
-user/<camera>/motors.json
-user/<camera>/<ip>/motors.json
 ```
 
 Other JSON files are handled differently:
 
 - `/etc/thingino.json` supports user-layered import through `thingino.json`
-- `/etc/motors.json` supports user-layered import through `motors.json`
+  (this includes PTZ/motor tuning under its `motors` section)
 - `/etc/prudynt.json` camera defaults are controlled through camera-scoped
   `prudynt.json`, not through `THINGINO_USER_DIR`
 - Other JSON configs such as `/etc/prudynt.json` or `/etc/timelapse.json` do not

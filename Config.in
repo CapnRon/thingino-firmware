@@ -76,7 +76,7 @@ menuconfig BR2_THINGINO_SYSTEM_PACKAGES
 	select BR2_PACKAGE_THINGINO_JCT
 	select BR2_PACKAGE_THINGINO_KOPT
 	select BR2_PACKAGE_THINGINO_LIBCURL
-	select BR2_PACKAGE_THINGINO_ONVIF if (BR2_PACKAGE_PRUDYNT_T || BR2_PACKAGE_THINGINO_RAPTOR) && BR2_THINGINO_DEV_IPCAM
+	select BR2_PACKAGE_THINGINO_ONVIF if (BR2_PACKAGE_PRUDYNT_T || BR2_PACKAGE_THINGINO_RAPTOR || BR2_PACKAGE_TIMPS) && BR2_THINGINO_DEV_IPCAM
 	select BR2_TARGET_UBOOT
 	select BR2_PACKAGE_THINGINO_WEBUI
 	select BR2_PACKAGE_UBOOT_TOOLS
@@ -117,6 +117,7 @@ source "$BR2_EXTERNAL_THINGINO_PATH/package/ingenic-sdk/Config.in"
 source "$BR2_EXTERNAL_THINGINO_PATH/package/ingenic-system-libs-neo/Config.in"
 source "$BR2_EXTERNAL_THINGINO_PATH/package/ingenic-uclibc/Config.in"
 source "$BR2_EXTERNAL_THINGINO_PATH/package/libaudioprocess-neo/Config.in"
+source "$BR2_EXTERNAL_THINGINO_PATH/package/esp-microspeech-features/Config.in"
 source "$BR2_EXTERNAL_THINGINO_PATH/package/logcat/Config.in"
 source "$BR2_EXTERNAL_THINGINO_PATH/package/logcat-mini/Config.in"
 source "$BR2_EXTERNAL_THINGINO_PATH/package/magik-models/Config.in"
@@ -134,6 +135,7 @@ source "$BR2_EXTERNAL_THINGINO_PATH/package/thingino-daynightd/Config.in"
 source "$BR2_EXTERNAL_THINGINO_PATH/package/thingino-diag/Config.in"
 source "$BR2_EXTERNAL_THINGINO_PATH/package/thingino-daynight/Config.in"
 source "$BR2_EXTERNAL_THINGINO_PATH/package/thingino-ethernet/Config.in"
+source "$BR2_EXTERNAL_THINGINO_PATH/package/thingino-floodlightd/Config.in"
 source "$BR2_EXTERNAL_THINGINO_PATH/package/thingino-gpio/Config.in"
 source "$BR2_EXTERNAL_THINGINO_PATH/package/thingino-httpd-ssl/Config.in"
 source "$BR2_EXTERNAL_THINGINO_PATH/package/thingino-jct/Config.in"

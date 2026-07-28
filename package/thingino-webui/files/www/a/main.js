@@ -687,24 +687,24 @@ function toggleMotion(state) {
   const button = $("#motion");
   if (button) button.classList.add("pending");
 
-  const payload = JSON.stringify({ motion: { enabled: state } });
-  fetch("/x/json-prudynt.cgi", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: payload,
+  agentJsonRequest("/api/v1/settings/motion/enabled", {
+    method: "PATCH",
+    body: { enabled: state },
+    cache: "no-store",
   })
-    .then((res) => {
-      if (!res.ok) throw new Error(`HTTP error ${res.status}`);
-      return res.text();
-    })
-    .then((text) => {
-      if (text) {
-        const data = JSON.parse(text);
-        console.log(ts(), "<===", JSON.stringify(data));
-        if (data.motion && data.motion.enabled !== undefined) {
-          updateHeartbeatUi({ motion_enabled: data.motion.enabled });
-          return;
-        }
+    .then((data) => {
+      console.log(ts(), "<===", JSON.stringify(data));
+      if (data && data.resource && data.resource.enabled !== undefined) {
+        updateHeartbeatUi({ motion_enabled: data.resource.enabled });
+        return;
+      }
+      if (data && data.enabled !== undefined) {
+        updateHeartbeatUi({ motion_enabled: data.enabled });
+        return;
+      }
+      if (data && data.motion && data.motion.enabled !== undefined) {
+        updateHeartbeatUi({ motion_enabled: data.motion.enabled });
+        return;
       }
       updateHeartbeatUi({ motion_enabled: state });
     })
@@ -718,24 +718,20 @@ function togglePrivacy(state) {
   const button = $("#privacy");
   if (button) button.classList.add("pending");
 
-  const payload = JSON.stringify({ privacy: { enabled: state } });
-  fetch("/x/json-prudynt.cgi", {
+  agentJsonRequest("/api/v1/actions/privacy", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: payload,
+    body: { enabled: state },
+    cache: "no-store",
   })
-    .then((res) => {
-      if (!res.ok) throw new Error(`HTTP error ${res.status}`);
-      return res.text();
-    })
-    .then((text) => {
-      if (text) {
-        const data = JSON.parse(text);
-        console.log(ts(), "<===", JSON.stringify(data));
-        if (data.privacy && data.privacy.enabled !== undefined) {
-          updateHeartbeatUi({ privacy_enabled: data.privacy.enabled });
-          return;
-        }
+    .then((data) => {
+      console.log(ts(), "<===", JSON.stringify(data));
+      if (data && data.privacy && data.privacy.enabled !== undefined) {
+        updateHeartbeatUi({ privacy_enabled: data.privacy.enabled });
+        return;
+      }
+      if (data && data.enabled !== undefined) {
+        updateHeartbeatUi({ privacy_enabled: data.enabled });
+        return;
       }
       updateHeartbeatUi({ privacy_enabled: state });
     })
@@ -2838,41 +2834,61 @@ function initPasswordRevealToggles(root = document) {
     }
   });
 
-  // Check session status and default password
-  async function checkSessionAndPassword() {
+  // Check session status and default password.
+  // Only a definitive 401/403 or authenticated:false triggers a redirect;
+  // transient failures retry with backoff instead of bouncing to /login.html.
+  async function checkSessionAndPassword(attempt) {
+    attempt = attempt || 0;
+    let data = null;
+
     try {
       const response = await fetch("/x/session-status.cgi", {
         cache: "no-store",
       });
 
-      if (!response.ok) {
-        // Session check failed - redirect to login
+      if (response.status === 401 || response.status === 403) {
+        // definitive auth refusal from the server
         window.location.href = "/login.html";
         return;
       }
 
-      const data = await response.json();
-
-      if (!data.authenticated) {
-        // Not authenticated - redirect to login
-        window.location.href = "/login.html";
-        return;
+      if (response.ok) {
+        data = await response.json(); // non-JSON throws -> retry path
       }
-
-      // Check if using default password
-      if (data.is_default_password) {
-        isDefaultPassword = true;
-        passwordCheckComplete = true;
-        showPasswordWarningModal();
-      } else {
-        isDefaultPassword = false;
-        passwordCheckComplete = true;
-        heartbeat();
-      }
+      // any other status (5xx, 0-length proxy error, ...) -> retry path
     } catch (err) {
       console.error("Session check failed:", err);
-      // On error, redirect to login
+    }
+
+    if (!data || typeof data.authenticated === "undefined") {
+      if (attempt < 2) {
+        setTimeout(
+          () => checkSessionAndPassword(attempt + 1),
+          1000 * (attempt + 1),
+        );
+      } else {
+        console.error(
+          "Session status endpoint unreachable - staying on page instead of redirecting to login",
+        );
+      }
+      return;
+    }
+
+    if (!data.authenticated) {
+      // Not authenticated - redirect to login
       window.location.href = "/login.html";
+      return;
+    }
+
+    // Check if using default password
+    if (data.is_default_password) {
+      isDefaultPassword = true;
+      passwordCheckComplete = true;
+      showPasswordWarningModal();
+    } else {
+      isDefaultPassword = false;
+      passwordCheckComplete = true;
+      heartbeat();
     }
   }
 

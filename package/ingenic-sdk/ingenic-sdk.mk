@@ -1,18 +1,40 @@
 INGENIC_SDK_SITE_METHOD = git
-INGENIC_SDK_SITE = https://github.com/themactep/ingenic-sdk
-INGENIC_SDK_SITE_BRANCH = master
-INGENIC_SDK_VERSION = 3e578d1a80d1d9a588db4e1e5e6c8ba0dbc79128
+INGENIC_SDK_SITE = https://github.com/thingino/ingenic-sdk
+INGENIC_SDK_SITE_BRANCH = main
+INGENIC_SDK_VERSION = 703bbd6e1a740b7636628b3d4180447525afce0c
 
-INGENIC_SDK_LICENSE = GPL-3.0
+INGENIC_SDK_LICENSE = GPL-2.0+
 INGENIC_SDK_LICENSE_FILES = LICENSE
 
 # Ensure thingino-core is installed before ingenic-sdk so thingino.json is available
-INGENIC_SDK_DEPENDENCIES = thingino-core
+INGENIC_SDK_DEPENDENCIES = thingino-core host-thingino-jct
 
 # Optional ISP firmware version for sensor IQ selection. When set, IQ tuning is
 # taken from sensor-iq/<soc>/<version>/ (e.g. t23 2.10) instead of the flat
 # per-soc default. Empty selects the primary version.
 SENSOR_ISP_FW = $(call qstrip,$(BR2_SENSOR_ISP_FW))
+
+# Map thingino's config onto the SDK's own CONFIG_INGENIC_* component
+# switches, driven by the "SDK components" menu in this package's Config.in.
+# The SDK no longer reads BR2_* symbols itself.
+#
+# Each mapping forces an explicit y/n so the menu is authoritative: the
+# Config.in default already carries the SoC/kernel-correct value, and an
+# override there wins. Audio follows the top-level BR2_THINGINO_AUDIO
+# switch rather than a component-menu entry.
+INGENIC_SDK_COMPONENTS = \
+	CONFIG_INGENIC_ISP=$(if $(BR2_THINGINO_DEV_CAMERA),y,n) \
+	CONFIG_INGENIC_SENSOR=$(if $(BR2_THINGINO_DEV_CAMERA),y,n) \
+	CONFIG_INGENIC_AUDIO=$(if $(BR2_THINGINO_AUDIO),y,n) \
+	CONFIG_INGENIC_AVPU=$(if $(BR2_INGENIC_SDK_AVPU),y,n) \
+	CONFIG_INGENIC_SOC_NNA=$(if $(BR2_INGENIC_SDK_SOC_NNA),y,n) \
+	CONFIG_INGENIC_MPSYS=$(if $(BR2_INGENIC_SDK_MPSYS),y,n) \
+	CONFIG_INGENIC_JZ_DTRNG=$(if $(BR2_INGENIC_SDK_MPSYS),y,n) \
+	CONFIG_INGENIC_GPIO_USERKEYS=$(if $(BR2_INGENIC_SDK_GPIO_USERKEYS),y,n) \
+	CONFIG_INGENIC_JZ_AES=$(if $(BR2_INGENIC_SDK_JZ_AES),y,n) \
+	CONFIG_INGENIC_TCU_ALLOC=$(if $(BR2_INGENIC_SDK_TCU_ALLOC),y,n) \
+	CONFIG_INGENIC_PWM=$(if $(BR2_INGENIC_SDK_PWM),y,n) \
+	CONFIG_INGENIC_MOTOR=$(if $(BR2_INGENIC_SDK_MOTOR),y,n)
 
 INGENIC_SDK_MODULE_MAKE_OPTS = \
 	SOC_FAMILY=$(SOC_FAMILY) \
@@ -20,6 +42,7 @@ INGENIC_SDK_MODULE_MAKE_OPTS = \
 	INSTALL_MOD_PATH=$(TARGET_DIR) \
 	INSTALL_MOD_DIR=ingenic \
 	SENSOR_1_MODEL=$(SENSOR_1_MODEL) \
+	$(INGENIC_SDK_COMPONENTS) \
 	$(MULTI_SENSOR_ENABLED) \
 	$(MULTI_SENSOR_1_ENABLED) \
 	$(MULTI_SENSOR_2_ENABLED)
@@ -78,18 +101,25 @@ LINUX_CONFIG_LOCALVERSION = \
 
 TARGET_MODULES_PATH = $(TARGET_DIR)/usr/lib/modules/$(KERNEL_VERSION)$(call qstrip,$(LINUX_CONFIG_LOCALVERSION))
 
+# Use the host jct tool by absolute path, not a bare `which jct`: the
+# host PATH is not guaranteed to carry it, and a silent miss here drops
+# the button config with no error. host-thingino-jct is a build
+# dependency (below) so the tool exists when this runs.
+INGENIC_SDK_JCT = $(HOST_DIR)/bin/jct
+
 define GENERATE_GPIO_USERKEYS_CONFIG
-	if [ -r $(TARGET_DIR)/etc/thingino.json ]; then \
+	if [ "$(BR2_INGENIC_SDK_GPIO_USERKEYS)" = "y" ] && [ -r $(TARGET_DIR)/etc/thingino.json ]; then \
+		if [ ! -x $(INGENIC_SDK_JCT) ]; then \
+			echo "ERROR: host jct tool missing: $(INGENIC_SDK_JCT)"; exit 1; \
+		fi; \
 		gpio_userkeys_config=""; \
-		if which jct >/dev/null 2>&1; then \
-			button_reset=$$(jct $(TARGET_DIR)/etc/thingino.json get gpio.button_reset 2>/dev/null); \
-			if [ -n "$$button_reset" ] && [ "$$button_reset" != "null" ]; then \
-				gpio_userkeys_config="28,$${button_reset},1"; \
-			fi; \
-			button_chime=$$(jct $(TARGET_DIR)/etc/thingino.json get gpio.chime 2>/dev/null); \
-			if [ -n "$$button_chime" ] && [ "$$button_chime" != "null" ]; then \
-				gpio_userkeys_config="$${gpio_userkeys_config:+$$gpio_userkeys_config;}2,$${button_chime},1"; \
-			fi; \
+		button_reset=$$($(INGENIC_SDK_JCT) $(TARGET_DIR)/etc/thingino.json get gpio.button_reset 2>/dev/null); \
+		if [ -n "$$button_reset" ] && [ "$$button_reset" != "null" ]; then \
+			gpio_userkeys_config="28,$${button_reset},1"; \
+		fi; \
+		button_chime=$$($(INGENIC_SDK_JCT) $(TARGET_DIR)/etc/thingino.json get gpio.chime 2>/dev/null); \
+		if [ -n "$$button_chime" ] && [ "$$button_chime" != "null" ]; then \
+			gpio_userkeys_config="$${gpio_userkeys_config:+$$gpio_userkeys_config;}2,$${button_chime},1"; \
 		fi; \
 		if [ -n "$$gpio_userkeys_config" ]; then \
 			echo "gpio-userkeys gpio_config=\"$$gpio_userkeys_config\"" > $(TARGET_DIR)/etc/modules.d/gpio-userkeys; \
@@ -156,13 +186,11 @@ define GENERATE_MODULE_LOADER
 		fi \
 	fi
 
-	if [ "$(BR2_THINGINO_DEV_CAMERA)" = "y" ]; then \
-		if [ "$(SOC_FAMILY)" = "t31" ] || [ "$(SOC_FAMILY)" = "c100" ] || [ "$(SOC_FAMILY)" = "t40" ] || [ "$(SOC_FAMILY)" = "t41" ]; then \
-			echo "avpu $(AVPU_CLK_SRC) $(AVPU_CLK)" > $(TARGET_DIR)/etc/modules.d/10-avpu; \
-		fi \
+	if [ "$(BR2_INGENIC_SDK_AVPU)" = "y" ]; then \
+		echo "avpu $(AVPU_CLK_SRC) $(AVPU_CLK)" > $(TARGET_DIR)/etc/modules.d/10-avpu; \
 	fi
 
-	if [ "$(BR2_THINGINO_PWM_ENABLE)" = "y" ]; then \
+	if [ "$(BR2_INGENIC_SDK_PWM)" = "y" ]; then \
 		echo "pwm_core tcu_channels=0,1,3" >> $(TARGET_DIR)/etc/modules.d/pwm; \
 		echo "pwm_hal" >> $(TARGET_DIR)/etc/modules.d/pwm; \
 	fi

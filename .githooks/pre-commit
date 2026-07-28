@@ -14,6 +14,18 @@ if [ -n "$js_staged_files" ]; then
 	done
 fi
 
+defconfig_staged_files=$(git diff --cached --name-only --diff-filter=ACMR -- 'configs/cameras/*defconfig*' 'configs/cameras-exp/*defconfig*')
+
+if [ -n "$defconfig_staged_files" ]; then
+	echo "pre-commit: sorting staged camera defconfig files"
+
+	echo "$defconfig_staged_files" | while IFS= read -r file; do
+		[ -n "$file" ] || continue
+		./scripts/sort_defconfig.py "$file"
+		git add -- "$file"
+	done
+fi
+
 shell_staged_files=$(
 	git diff --cached --name-only --diff-filter=ACMR | while IFS= read -r file; do
 		[ -f "$file" ] || continue
@@ -35,7 +47,7 @@ if [ -n "$shell_staged_files" ]; then
 
 	echo "$shell_staged_files" | while IFS= read -r file; do
 		[ -n "$file" ] || continue
-		shfmt -w -i 0 -ci "$file"
+		shfmt -ln mksh -w -i 0 -ci "$file"
 		git add -- "$file"
 	done
 fi

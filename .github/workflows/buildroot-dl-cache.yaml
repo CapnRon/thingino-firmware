@@ -74,7 +74,10 @@ jobs:
   build-caches:
     name: ${{ matrix.caches-version }}
     needs: notify-begin
-    runs-on: ubuntu-24.04
+    # arm64: firmware builds now default to arm64, so the cache must hold the aarch64 toolchain
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
     defaults:
       run:
         shell: bash
@@ -87,13 +90,20 @@ jobs:
           - build_cache
 
     steps:
+      - name: Install GitHub CLI to container
+        run: |
+          apt-get update
+          apt-get install -y curl
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+
       - name: Update package manager sources
         run: |
           apt-get update
 
       - name: Install build dependencies
         run: |
-          apt-get install -y --no-install-recommends --no-install-suggests build-essential bc ccache cmake cpio curl ca-certificates file git make gawk procps rsync u-boot-tools unzip wget p7zip-full
+          apt-get install -y --no-install-recommends --no-install-suggests build-essential bc ccache cmake cpio curl ca-certificates file git gh make gawk procps rsync u-boot-tools unzip wget p7zip-full
 
       - name: Set timezone
         run: |
@@ -121,9 +131,8 @@ jobs:
           echo "TG_DISABLED=${{ github.event.inputs.tg_disabled || 'false' }}" >> $GITHUB_ENV
           DATE_TAG=$(date +'%Y-%m-%d')
           echo "DATE_TAG=$DATE_TAG" >> $GITHUB_ENV
-          TAG_NAME="$TAG_NAME-$DATE_TAG"
+          # Rolling cache: always publish to the fixed 'update_cache' tag (no date suffix)
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
-          echo "RELEASE_NAME=buildroot-dl-cache-$DATE_TAG" >> $GITHUB_ENV
 
           echo "GIT_HASH=$(git rev-parse --short ${GITHUB_SHA})" >> $GITHUB_OUTPUT
           echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_OUTPUT
@@ -133,9 +142,17 @@ jobs:
           mkdir -p ~/.buildroot-ccache
           mkdir -p ~/dl
 
-      - name: Download buildroot sources
+      - name: Download buildroot sources (all cache variants)
         run: |
-          BOARD=${{ matrix.caches-version }} GROUP=github make source WORKFLOW=1
+          # One shared ~/dl. build_cache pulls every package + all wifi (xburst1 toolchain);
+          # the variant configs add the other toolchain tags + their kernel/u-boot.
+          for cfg in build_cache build_cache_xburst1_44 build_cache_xburst2; do
+            echo "::group::make source — $cfg"
+            BOARD=$cfg GROUP=github make source WORKFLOW=1
+            # `make source` does not fetch the external toolchain tarball; pull it explicitly
+            BOARD=$cfg GROUP=github make br-toolchain-external-custom-source WORKFLOW=1 || echo "toolchain-source skipped for $cfg"
+            echo "::endgroup::"
+          done
           TIME=$(date -d @${SECONDS} +%M:%S)
           echo "TIME=${TIME}" >> ${GITHUB_ENV}
 
@@ -147,8 +164,10 @@ jobs:
         run: |
           mkdir -p /tmp/dl-archive
           cd ~/
-          # Using ZIP format with store method (no compression) for maximum speed
-          7z a -tzip -mx=0 -v1536m /tmp/dl-archive/buildroot-dl-cache.zip dl/
+          # ZIP store mode (no compression) for speed. Small -v parts (~384M): 'gh release download'
+          # fetches the release assets in parallel, so many small parts saturate bandwidth while big
+          # 1GB parts hit GitHub's per-asset throttle. Measured: gh + 7x384M ~= 7s vs 25s with 3x1GB.
+          7z a -tzip -mx=0 -v384m /tmp/dl-archive/buildroot-dl-cache.zip dl/
 
       - name: Check archive files
         run: |
@@ -156,16 +175,30 @@ jobs:
           echo "Archive created with the following parts:"
           ls -lh /tmp/dl-archive/buildroot-dl-cache*.zip*
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2.1.0
-        with:
-          name: "buildroot-dl-cache"
-          tag_name: "${{ env.TAG_NAME }}"
-          files: /tmp/dl-archive/buildroot-dl-cache*.zip*
-          token: ${{ secrets.GITHUB_TOKEN }}
-          draft: false
-          prerelease: false
-          make_latest: false
+      - name: Publish rolling buildroot-dl-cache release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG=update_cache
+          BODY="Rolling buildroot download cache. Last updated ${DATE_TAG} (${GIT_HASH})."
+          # Create the rolling release once; refresh its notes on later runs. Never mark it 'latest'.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "buildroot-dl-cache" --notes "$BODY" --latest=false
+          else
+            gh release create "$TAG" --title "buildroot-dl-cache" --notes "$BODY" --latest=false
+          fi
+          # Upload this run's archive parts, overwriting any same-named parts in place.
+          gh release upload "$TAG" --clobber /tmp/dl-archive/buildroot-dl-cache*.zip*
+          # Drop orphaned parts left by a previous, larger split so the published set matches this run.
+          produced="$(cd /tmp/dl-archive && ls buildroot-dl-cache*.zip*)"
+          gh release view "$TAG" --json assets --jq '.assets[].name' | while read -r name; do
+            if ! grep -qxF "$name" <<<"$produced"; then
+              echo "Deleting stale asset: $name"
+              gh release delete-asset "$TAG" "$name" --yes
+            fi
+          done
 
       - name: Send error notification
         if: ${{ env.TG_DISABLED == 'false' && failure() }}

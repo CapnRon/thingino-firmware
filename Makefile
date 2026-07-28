@@ -52,6 +52,9 @@ endif
 export THINGINO_USER_DIR
 THINGINO_USER_COMMON_DIR := $(THINGINO_USER_DIR)/common
 
+# Global backup directory for camera overlay archives
+THINGINO_BACKUP_DIR ?= $(HOME)/.thingino/backups
+
 # repo data
 GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD | tr -d '()' | xargs)
 GIT_HASH = "$(shell git show -s --format=%H | cut -c1-7)"
@@ -91,7 +94,6 @@ endif
 THINGINO_USER_FRAGMENT_FILES := $(wildcard $(THINGINO_USER_COMMON_DIR)/local.fragment)
 THINGINO_USER_MK_FILES := $(wildcard $(THINGINO_USER_COMMON_DIR)/local.mk)
 THINGINO_USER_JSON_FILES := $(wildcard $(THINGINO_USER_COMMON_DIR)/thingino.json)
-THINGINO_USER_MOTORS_JSON_FILES := $(wildcard $(THINGINO_USER_COMMON_DIR)/motors.json)
 THINGINO_USER_PRUDYNT_JSON_FILES := $(wildcard $(THINGINO_USER_COMMON_DIR)/prudynt.json)
 THINGINO_USER_UENV_FILES := $(wildcard $(THINGINO_USER_COMMON_DIR)/local.uenv.txt)
 THINGINO_USER_OVERLAY_DIRS := $(wildcard $(THINGINO_USER_COMMON_DIR)/overlay)
@@ -102,7 +104,6 @@ ifdef THINGINO_USER_CAMERA_DIR
 THINGINO_USER_FRAGMENT_FILES += $(wildcard $(THINGINO_USER_CAMERA_DIR)/local.fragment)
 THINGINO_USER_MK_FILES += $(wildcard $(THINGINO_USER_CAMERA_DIR)/local.mk)
 THINGINO_USER_JSON_FILES += $(wildcard $(THINGINO_USER_CAMERA_DIR)/thingino.json)
-THINGINO_USER_MOTORS_JSON_FILES += $(wildcard $(THINGINO_USER_CAMERA_DIR)/motors.json)
 THINGINO_USER_PRUDYNT_JSON_FILES += $(wildcard $(THINGINO_USER_CAMERA_DIR)/prudynt.json)
 THINGINO_USER_UENV_FILES += $(wildcard $(THINGINO_USER_CAMERA_DIR)/local.uenv.txt)
 THINGINO_USER_OVERLAY_DIRS += $(wildcard $(THINGINO_USER_CAMERA_DIR)/overlay)
@@ -113,7 +114,6 @@ ifdef THINGINO_USER_DEVICE_DIR
 THINGINO_USER_FRAGMENT_FILES += $(wildcard $(THINGINO_USER_DEVICE_DIR)/local.fragment)
 THINGINO_USER_MK_FILES += $(wildcard $(THINGINO_USER_DEVICE_DIR)/local.mk)
 THINGINO_USER_JSON_FILES += $(wildcard $(THINGINO_USER_DEVICE_DIR)/thingino.json)
-THINGINO_USER_MOTORS_JSON_FILES += $(wildcard $(THINGINO_USER_DEVICE_DIR)/motors.json)
 THINGINO_USER_PRUDYNT_JSON_FILES += $(wildcard $(THINGINO_USER_DEVICE_DIR)/prudynt.json)
 THINGINO_USER_UENV_FILES += $(wildcard $(THINGINO_USER_DEVICE_DIR)/local.uenv.txt)
 THINGINO_USER_OVERLAY_DIRS += $(wildcard $(THINGINO_USER_DEVICE_DIR)/overlay)
@@ -127,7 +127,6 @@ export THINGINO_ROOT_LOCAL_MK_FILES
 export THINGINO_USER_FRAGMENT_FILES
 export THINGINO_USER_MK_FILES
 export THINGINO_USER_JSON_FILES
-export THINGINO_USER_MOTORS_JSON_FILES
 export THINGINO_USER_PRUDYNT_JSON_FILES
 export THINGINO_USER_UENV_FILES
 export THINGINO_USER_OVERLAY_DIRS
@@ -159,7 +158,6 @@ $(call print_build_user_files_section,repo local.mk,$(THINGINO_ROOT_LOCAL_MK_FIL
 $(call print_build_user_files_section,local.fragment,$(THINGINO_USER_FRAGMENT_FILES))
 $(call print_build_user_files_section,user local.mk,$(THINGINO_USER_MK_FILES))
 $(call print_build_user_files_section,thingino.json,$(THINGINO_USER_JSON_FILES))
-$(call print_build_user_files_section,motors.json,$(THINGINO_USER_MOTORS_JSON_FILES))
 $(call print_build_user_files_section,prudynt.json,$(THINGINO_USER_PRUDYNT_JSON_FILES))
 $(call print_build_user_files_section,local.uenv.txt,$(THINGINO_USER_UENV_FILES))
 $(call print_build_user_files_section,overlay files,$(THINGINO_USER_OVERLAY_FILES))
@@ -193,7 +191,11 @@ THINGINO_UBOOT_VERSION_TAG := $(if $(filter 2026_07,$(THINGINO_UBOOT_VERSION_RAW
 THINGINO_UBOOT_FRAGMENT_FILE := configs/fragments/uboot/v$(THINGINO_UBOOT_VERSION_TAG).fragment
 
 UBOOT_BIN_NAME := $(if $(filter 2013-07,$(THINGINO_UBOOT_VERSION_TAG)),u-boot-lzo-with-spl.bin,u-boot-with-spl-lzma.bin)
-AUTOUPDATE_PREFIX := $(if $(filter 2013-07,$(THINGINO_UBOOT_VERSION_TAG)),,run autoupdate;)
+# loaduenv must run AFTER autoupdate: a full autoupdate erases the whole chip
+# (env partition included) and resets, so an env imported before flashing would
+# be lost. Running after means uenv.txt is applied on the first boot of the
+# freshly flashed firmware (autoupdate skips via its .done marker by then).
+AUTOUPDATE_PREFIX := $(if $(filter 2013-07,$(THINGINO_UBOOT_VERSION_TAG)),,run autoupdate;run loaduenv;)
 
 ifneq ($(CAMERA_CONFIG_REAL),)
 ifndef TOOLCHAIN_LIBC
@@ -259,6 +261,7 @@ SED_CONFIG_VARS = sed \
 	 s/\$$[(]TOOLCHAIN_SOC_TAG[)]/$(TOOLCHAIN_SOC_TAG)/g; \
 	 s/\$$[(]SOC_MODEL[)]/$(SOC_MODEL)/g; \
 	 s/\$$[(]SOC_FAMILY[)]/$(SOC_FAMILY)/g; \
+	 s/\$$[(]NAND_FLASH_CONTROLLER_SYM[)]/$(NAND_FLASH_CONTROLLER_SYM)/g; \
 	 s/\$$[(]KERNEL_VERSION[)]/$(KERNEL_VERSION)/g; \
 	 s/\$$[(]KERNEL_SITE[)]/$(subst /,\/,$(KERNEL_SITE))/g; \
 	 s/\$$[(]KERNEL_BRANCH[)]/$(KERNEL_BRANCH)/g; \
@@ -271,6 +274,7 @@ SED_CONFIG_VARS = sed \
 ORANGE := printf '\033[1;38;5;214m%s\033[0m\n'
 TEAL := printf '\033[1;38;5;30m%s\033[0m\n'
 RED := printf '\033[1;38;5;160m%s\033[0m\n'
+GREEN := printf '\033[1;38;5;40m%s\033[0m\n'
 
 ALIGN_BLOCK := 65536
 
@@ -382,7 +386,7 @@ endef
 	sdk toolchain update br-% \
 	check-config force-config show-config-deps clean-config \
 	tftpd-start tftpd-stop tftpd-restart tftpd-status tftpd-logs tftp-copy tftp-upload \
-	dfu scriba upload_serial ota run show-vars user-dirs setup-hooks
+	dfu scriba upload_serial ota backup-overlay run show-vars user-dirs setup-hooks
 
 # Run a binary under QEMU in the build sysroot.
 # Usage: CAMERA=<camera> make run CMD="/bin/ffmpeg --help"  (binary with args)
@@ -400,7 +404,7 @@ ifeq (run,$(firstword $(MAKECMDGOALS)))
 endif
 
 # Create user directory skeleton for common, per-camera, and per-device levels
-USER_DIR_FILES := local.fragment local.mk local.uenv.txt thingino.json motors.json
+USER_DIR_FILES := local.fragment local.mk local.uenv.txt thingino.json
 
 define create_user_dir
 	@mkdir -p $(1)/overlay $(1)/opt
@@ -772,6 +776,13 @@ else
 	@if [ $(FIRMWARE_BIN_FULL_SIZE) -gt $(FLASH_SIZE) ]; then $(RED) "OVERSIZE"; fi
 	@echo "Image: $(FIRMWARE_BIN_FULL)"
 endif
+	@echo ""
+	@ELAPSED=$$(( $$(date +%s) - $(THINGINO_BUILD_START_EPOCH) )); \
+		H=$$((ELAPSED / 3600)); M=$$(((ELAPSED % 3600) / 60)); S=$$((ELAPSED % 60)); \
+		if [ $$H -gt 0 ]; then HMS=$$(printf '%dh %02dm %02ds' $$H $$M $$S); \
+		elif [ $$M -gt 0 ]; then HMS=$$(printf '%dm %02ds' $$M $$S); \
+		else HMS=$$(printf '%ds' $$S); fi; \
+		$(GREEN) "Total build time: $$HMS"
 
 build-info: pack
 	@$(TEAL) "$@"
@@ -821,7 +832,13 @@ ota:
 	@fw_path="$(FIRMWARE_BIN_FULL)"; \
 	if [ ! -f "$$fw_path" ]; then fw_path="$(GENERIC_FIRMWARE_BIN_FULL)"; fi; \
 	test -f "$$fw_path" || { echo "ERROR: Neither $(FIRMWARE_BIN_FULL) nor $(GENERIC_FIRMWARE_BIN_FULL) was found. Run make first."; exit 1; }; \
-	$(SCRIPTS_DIR)/fw_ota.sh "$$fw_path" $(CAMERA_IP_ADDRESS)
+	$(SCRIPTS_DIR)/fw_ota.sh $(if $(filter 1 y yes true,$(FORCE)),-f) "$$fw_path" $(CAMERA_IP_ADDRESS)
+
+# backup /overlay from a camera to a local tarball
+backup-overlay:
+	@$(TEAL) "$@"
+	@[ -n "$(CAMERA_IP_ADDRESS)" ] || { echo "ERROR: IP is required for $@. Use 'make $@ IP=<camera-ip>'."; exit 1; }
+	$(SCRIPTS_DIR)/backup_overlay.sh $(CAMERA_IP_ADDRESS) $(THINGINO_BACKUP_DIR)
 
 # Start standalone TFTP server for serving firmware images
 tftpd-start:
@@ -1094,7 +1111,16 @@ else ifeq ($(BR2_THINGINO_FLASH_NAND),y)
 	#     U-Boot's DT - so mtdparts= is REQUIRED. "ubi.mtd=ubi" attaches the rest
 	#     as ubi0; "ubi.block=0,rootfs" exposes the squashfs "rootfs" volume as
 	#     /dev/ubiblock0_2. root= / rootfstype= come from the flash-nand fragment.
-	echo 'bootcmd=ubi part ubi;ubi read $${loadaddr} kernel;setenv bootargs mem=$${osmem} rmem=$${rmem}$$(UBOOT_ISPMEM)$$(UBOOT_NMEM) console=$${serialport},$${baudrate}n8 panic=$${panic_timeout} mtdparts=$(UBOOT_FLASH_CONTROLLER):1024k(boot),-(ubi) ubi.mtd=ubi ubi.block=0,rootfs root=$${root} rootfstype=$${rootfstype} init=$${init};bootm $${loadaddr}' >> $@
+	echo 'bootcmd=$(AUTOUPDATE_PREFIX)ubi part ubi;ubi read $${loadaddr} kernel;setenv bootargs mem=$${osmem} rmem=$${rmem}$$(UBOOT_ISPMEM)$$(UBOOT_NMEM) console=$${serialport},$${baudrate}n8 panic=$${panic_timeout} mtdparts=$(UBOOT_FLASH_CONTROLLER):1024k(boot),-(ubi) ubi.mtd=ubi ubi.block=0,rootfs root=$${root} rootfstype=$${rootfstype} init=$${init};bootm $${loadaddr}' >> $@
+	# NAND autoupdate: the sf (SPI-NOR) autoupdate from common.uenv.txt cannot flash
+	# NAND, so replace it with a full-chip mtd erase + write of the NAND
+	# thingino-<camera>.bin (placed on the SD card as autoupdate-full.bin). "mtd write"
+	# adds ECC/OOB and skips bad blocks; the whole-chip erase clears stale UBI PEBs.
+	# HW-validated on T40XP: the bootrom loads an mtd-written SPL. Prepended
+	# $(AUTOUPDATE_PREFIX) above wires it into the NAND bootcmd (the sf path already
+	# had it); both are stripped for non-SDCARD builds by the guard below.
+	sed -i '/^autoupdate=/d' $@
+	echo 'autoupdate=if test "$${enable_updates}" = "true"; then echo "checking for update file"; if fatsize mmc 0:1 autoupdate-full.done; then echo "AU: already applied"; else if fatload mmc 0:1 $${loadaddr} autoupdate-full.bin; then echo "AU: flashing autoupdate-full.bin"; if mtd erase spi-nand0 && mtd write spi-nand0 $${loadaddr} 0x0 $${filesize}; then fatwrite mmc 0:1 $${loadaddr} autoupdate-full.done 1; echo "AU: done, rebooting"; reset; fi; fi; fi; fi' >> $@
 else
 	# SFC boot: read kernel from SPI flash
 	echo "kern_addr=$$(printf '0x%x' $(KERNEL_OFFSET))" >> $@
@@ -1106,7 +1132,7 @@ else
 	echo 'bootcmd=$(AUTOUPDATE_PREFIX)sf probe;setenv bootargs mem=$${osmem} rmem=$${rmem}$$(UBOOT_ISPMEM)$$(UBOOT_NMEM) console=$${serialport},$${baudrate}n8 panic=$${panic_timeout} root=$${root} rootfstype=$${rootfstype} init=$${init} mtdparts=$${mtdparts};sf read $${loadaddr} $${kern_addr} $${kern_size};bootm $${loadaddr}' >> $@
 endif
 	@if ! grep -q '^BR2_THINGINO_SDCARD=y' $(OUTPUT_DIR)/.config 2>/dev/null; then \
-		sed -i '/^autoupdate=/d; /^mmc_power=/d; /^preboot=/d; /^gpio_mmc_power=/d; /^gpio_mmc_power_active_low=/d; s|run autoupdate;||' $@; \
+		sed -i '/^autoupdate=/d; /^loaduenv=/d; /^mmc_power=/d; /^preboot=/d; /^gpio_mmc_power=/d; /^gpio_mmc_power_active_low=/d; s|run autoupdate;||; s|run loaduenv;||' $@; \
 	fi
 	@if ! grep -q '^BR2_THINGINO_BUTTON=y' $(OUTPUT_DIR)/.config 2>/dev/null; then \
 		sed -i '/^button_cmd_0_name=/d; /^button_cmd_0=/d; /^overlay_wipe=/d; /^gpio_button=/d' $@; \
@@ -1198,6 +1224,7 @@ help:
 	  make force-config   force configuration regeneration\n\
 	  make show-config-deps  show configuration dependencies\n\
 	  make clean-config   remove configuration files\n\
+	  make PRISTINE=1     ignore user files\n\
 	  \n\
 	Buildroot Submodule Management:\n\
 	  scripts/update_buildroot.sh  advanced buildroot update with options\n\
@@ -1205,6 +1232,9 @@ help:
 	  make ota IP=192.168.1.10\n\
 	                      upload full firmware image to the camera\n\
 	                        over network, and flash it\n\n\
+	  make backup-overlay IP=192.168.1.10\n\
+	                      backup /overlay/ from camera to\n\
+	                        $(THINGINO_BACKUP_DIR)\n\n\
 	"
 
 # Print key variables commonly needed for tooling
@@ -1260,12 +1290,12 @@ show-vars:
 	@echo "THINGINO_USER_DIR = $(THINGINO_USER_DIR)";
 	@echo "THINGINO_USER_FRAGMENT_FILES = $(THINGINO_USER_FRAGMENT_FILES)";
 	@echo "THINGINO_USER_JSON_FILES = $(THINGINO_USER_JSON_FILES)";
-	@echo "THINGINO_USER_MOTORS_JSON_FILES = $(THINGINO_USER_MOTORS_JSON_FILES)";
 	@echo "THINGINO_USER_PRUDYNT_JSON_FILES = $(THINGINO_USER_PRUDYNT_JSON_FILES)";
 	@echo "THINGINO_USER_MK_FILES = $(THINGINO_USER_MK_FILES)";
 	@echo "THINGINO_USER_OPT_DIRS = $(THINGINO_USER_OPT_DIRS)";
 	@echo "THINGINO_USER_OVERLAY_DIRS = $(THINGINO_USER_OVERLAY_DIRS)";
 	@echo "THINGINO_USER_UENV_FILES = $(THINGINO_USER_UENV_FILES)";
+	@echo "THINGINO_BACKUP_DIR = $(THINGINO_BACKUP_DIR)";
 	@echo "UBOOT_BOARDNAME = $(UBOOT_BOARDNAME)";
 	@echo "UBOOT_DEFCONFIG = $(UBOOT_DEFCONFIG)";
 	@echo "UBOOT_BIN_NAME = $(UBOOT_BIN_NAME)";
@@ -1275,20 +1305,12 @@ run:
 	@$(TEAL) "$@"
 	$(SCRIPTS_DIR)/qemu_run.sh $(OUTPUT_DIR)/target $(_RUN_CMD)
 
-cloner:
-	@$(TEAL) "$@"
-	@test -f $(FIRMWARE_BIN_FULL) || { echo "ERROR: $(FIRMWARE_BIN_FULL) not found. Run make first."; exit 1; }
-	$(HOST_DIR)/bin/thingino-dfu --cloner \
-		-w $(FIRMWARE_BIN_FULL) --cpu $(SOC_FAMILY) \
-		--firmware-dir $(HOST_DIR)/share/thingino-dfu/firmware --reboot
-
-
 dfu:
 	@$(TEAL) "$@"
 	@test -f $(FIRMWARE_BIN_FULL) || { echo "ERROR: $(FIRMWARE_BIN_FULL) not found. Run make first."; exit 1; }
-	$(HOST_DIR)/bin/thingino-dfu -i 0 \
-		-w $(FIRMWARE_BIN_FULL) --cpu $(SOC_FAMILY) \
-		--firmware-dir $(HOST_DIR)/share/thingino-dfu/firmware --reboot
+	$(HOST_DIR)/bin/thingino-dfu \
+		-w $(FIRMWARE_BIN_FULL) \
+		--firmware-dir $(HOST_DIR)/share/thingino-dfu/firmware
 
 scriba:
 	@$(TEAL) "$@"
